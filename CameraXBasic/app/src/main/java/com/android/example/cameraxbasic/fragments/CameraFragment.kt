@@ -32,23 +32,13 @@ import android.os.Bundle
 import android.util.DisplayMetrics
 import android.util.Log
 import android.util.Rational
-import android.view.KeyEvent
-import android.view.LayoutInflater
-import android.view.TextureView
-import android.view.View
-import android.view.ViewGroup
+import android.view.*
 import android.webkit.MimeTypeMap
 import android.widget.ImageButton
-import androidx.camera.core.CameraX
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageAnalysisConfig
-import androidx.camera.core.ImageCapture
+import androidx.camera.core.*
 import androidx.camera.core.ImageCapture.CaptureMode
 import androidx.camera.core.ImageCapture.Metadata
-import androidx.camera.core.ImageCaptureConfig
-import androidx.camera.core.ImageProxy
-import androidx.camera.core.Preview
-import androidx.camera.core.PreviewConfig
+import androidx.camera.view.TextureViewMeteringPointFactory
 import androidx.navigation.Navigation
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.core.view.setPadding
@@ -252,7 +242,29 @@ class CameraFragment : Fragment() {
                 }.sorted().reversed().firstOrNull()?.let { setGalleryThumbnail(it) }
             }
         }
+
+        class TapGestureDetector : GestureDetector.SimpleOnGestureListener() {
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                val meteringPoint = TextureViewMeteringPointFactory(viewFinder).createPoint(e.x, e.y)
+
+                val action = FocusMeteringAction.Builder
+                        .from(meteringPoint)
+                        .build()
+
+                CameraX.getCameraControl(lensFacing).startFocusAndMetering(action)
+                return super.onSingleTapConfirmed(e)
+            }
+        }
+
+        viewFinder.setOnTouchListener(object: View.OnTouchListener {
+            override fun onTouch(v: View, event: MotionEvent): Boolean {
+                return TapGestureDetector().onSingleTapConfirmed(event)
+            }
+        })
     }
+
+
+
 
     /** Declare and bind preview, capture and analysis use cases */
     private fun bindCameraUseCases() {
