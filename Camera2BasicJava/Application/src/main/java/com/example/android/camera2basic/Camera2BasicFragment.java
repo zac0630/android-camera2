@@ -540,7 +540,6 @@ public class Camera2BasicFragment extends Fragment
                 //noinspection ConstantConditions
                 mSensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
                 boolean swappedDimensions = false;
-
                 switch (displayRotation) {
                     case Surface.ROTATION_0:
                     case Surface.ROTATION_180:
