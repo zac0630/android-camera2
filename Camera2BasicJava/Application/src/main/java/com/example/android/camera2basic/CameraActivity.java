@@ -23,12 +23,12 @@ public class CameraActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_camera);
+        super.onCreate(savedInstanceState);         //savedInstanceState保存activity上一次结束时的状态
+        setContentView(R.layout.activity_camera);   //加载主view和布局
         if (null == savedInstanceState) {
-            getSupportFragmentManager().beginTransaction()
-                    .replace(R.id.container, Camera2BasicFragment.newInstance())
-                    .commit();
+            getSupportFragmentManager().beginTransaction()      //开始操作Fragment
+                    .replace(R.id.container, Camera2BasicFragment.newInstance())    //清空container中所有的fragment，实例化一个新的Camera2BasicFragment进去
+                    .commit();                                  //提交事务
         }
     }
 

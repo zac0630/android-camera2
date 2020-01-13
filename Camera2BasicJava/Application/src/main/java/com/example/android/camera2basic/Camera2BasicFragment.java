@@ -50,6 +50,7 @@ import android.support.v4.app.DialogFragment;
 import android.support.v4.app.Fragment;
 import android.support.v4.content.ContextCompat;
 import android.util.Log;
+import android.util.Range;
 import android.util.Size;
 import android.util.SparseIntArray;
 import android.view.LayoutInflater;
@@ -135,7 +136,7 @@ public class Camera2BasicFragment extends Fragment
     private final TextureView.SurfaceTextureListener mSurfaceTextureListener
             = new TextureView.SurfaceTextureListener() {
 
-        @Override
+        @Override                                                         // 当TextureView可用时，打开摄像头
         public void onSurfaceTextureAvailable(SurfaceTexture texture, int width, int height) {
             openCamera(width, height);
         }
@@ -160,6 +161,8 @@ public class Camera2BasicFragment extends Fragment
      * ID of the current {@link CameraDevice}.
      */
     private String mCameraId;
+
+    private Range<Integer>[] fpsRanges;
 
     /**
      * An {@link AutoFitTextureView} for camera preview.
@@ -186,7 +189,7 @@ public class Camera2BasicFragment extends Fragment
      */
     private final CameraDevice.StateCallback mStateCallback = new CameraDevice.StateCallback() {
 
-        @Override
+        @Override                                                               //相机打开完成后，创建预览会话。
         public void onOpened(@NonNull CameraDevice cameraDevice) {
             // This method is called when the camera is opened. We start camera preview here.
             mCameraOpenCloseLock.release();
@@ -238,14 +241,23 @@ public class Camera2BasicFragment extends Fragment
      * This a callback object for the {@link ImageReader}. "onImageAvailable" will be called when a
      * still image is ready to be saved.
      */
+
     private final ImageReader.OnImageAvailableListener mOnImageAvailableListener
             = new ImageReader.OnImageAvailableListener() {
 
         @Override
         public void onImageAvailable(ImageReader reader) {
-            mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
-        }
+            //mBackgroundHandler.post(new ImageSaver(reader.acquireNextImage(), mFile));
 
+            Log.d("camera2basic","frame is available");
+            //需要调用acquireLatestImage()和close(),不然会卡顿
+            Image image = reader.acquireLatestImage();
+            //将这帧数据转成字节数组，类似于Camera1的PreviewCallback回调的预览帧数据
+            // ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+            //byte[] data = new byte[buffer.remaining()];
+            //buffer.get(data);
+            image.close();
+        }
     };
 
     /**
@@ -382,7 +394,7 @@ public class Camera2BasicFragment extends Fragment
      * @return The optimal {@code Size}, or an arbitrary one if none were big enough
      */
     private static Size chooseOptimalSize(Size[] choices, int textureViewWidth,
-            int textureViewHeight, int maxWidth, int maxHeight, Size aspectRatio) {
+                                          int textureViewHeight, int maxWidth, int maxHeight, Size aspectRatio) {
 
         // Collect the supported resolutions that are at least as big as the preview Surface
         List<Size> bigEnough = new ArrayList<>();
@@ -394,7 +406,7 @@ public class Camera2BasicFragment extends Fragment
             if (option.getWidth() <= maxWidth && option.getHeight() <= maxHeight &&
                     option.getHeight() == option.getWidth() * h / w) {
                 if (option.getWidth() >= textureViewWidth &&
-                    option.getHeight() >= textureViewHeight) {
+                        option.getHeight() >= textureViewHeight) {
                     bigEnough.add(option);
                 } else {
                     notBigEnough.add(option);
@@ -418,20 +430,20 @@ public class Camera2BasicFragment extends Fragment
         return new Camera2BasicFragment();
     }
 
-    @Override
+    @Override       //创建、返回布局
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
         return inflater.inflate(R.layout.fragment_camera2_basic, container, false);
     }
 
-    @Override
+    @Override       //绑定布局上的控件
     public void onViewCreated(final View view, Bundle savedInstanceState) {
         view.findViewById(R.id.picture).setOnClickListener(this);
         view.findViewById(R.id.info).setOnClickListener(this);
-        mTextureView = (AutoFitTextureView) view.findViewById(R.id.texture);
+        mTextureView =  view.findViewById(R.id.texture);
     }
 
-    @Override
+    @Override       //Activity已经创建完成，并创建一个文件实例
     public void onActivityCreated(Bundle savedInstanceState) {
         super.onActivityCreated(savedInstanceState);
         mFile = new File(getActivity().getExternalFilesDir(null), "pic.jpg");
@@ -492,9 +504,13 @@ public class Camera2BasicFragment extends Fragment
         Activity activity = getActivity();
         CameraManager manager = (CameraManager) activity.getSystemService(Context.CAMERA_SERVICE);
         try {
-            for (String cameraId : manager.getCameraIdList()) {
+            for (String cameraId : manager.getCameraIdList()) {     //检测系统有几个camera
                 CameraCharacteristics characteristics
                         = manager.getCameraCharacteristics(cameraId);
+
+                //test
+                int hardwareLevel=characteristics.get(CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
+                fpsRanges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
 
                 // We don't use a front facing camera in this sample.
                 Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
@@ -502,18 +518,19 @@ public class Camera2BasicFragment extends Fragment
                     continue;
                 }
 
-                StreamConfigurationMap map = characteristics.get(
+                StreamConfigurationMap map = characteristics.get(               //支持的视频流配置，分辨率。
                         CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
                 if (map == null) {
                     continue;
                 }
 
                 // For still image captures, we use the largest available size.
+                //拍照的JPEG的支持的最大的分辨率
                 Size largest = Collections.max(
                         Arrays.asList(map.getOutputSizes(ImageFormat.JPEG)),
                         new CompareSizesByArea());
                 mImageReader = ImageReader.newInstance(largest.getWidth(), largest.getHeight(),
-                        ImageFormat.JPEG, /*maxImages*/2);
+                        ImageFormat.YUV_420_888, /*maxImages*/2);
                 mImageReader.setOnImageAvailableListener(
                         mOnImageAvailableListener, mBackgroundHandler);
 
@@ -565,7 +582,7 @@ public class Camera2BasicFragment extends Fragment
                 // Danger, W.R.! Attempting to use too large a preview size could exceed the camera
                 // bus' bandwidth limitation, resulting in gorgeous previews but the storage of
                 // garbage capture data.
-                mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),
+                mPreviewSize = chooseOptimalSize(map.getOutputSizes(SurfaceTexture.class),      //SurfaceTexture支持的分辨率列表
                         rotatedPreviewWidth, rotatedPreviewHeight, maxPreviewWidth,
                         maxPreviewHeight, largest);
 
@@ -613,7 +630,7 @@ public class Camera2BasicFragment extends Fragment
             if (!mCameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
                 throw new RuntimeException("Time out waiting to lock camera opening.");
             }
-            manager.openCamera(mCameraId, mStateCallback, mBackgroundHandler);
+            manager.openCamera(mCameraId, mStateCallback, mBackgroundHandler);      //打开相机，监听相机的状态(定义多种callback函数)，在指定线程执行callback。
         } catch (CameraAccessException e) {
             e.printStackTrace();
         } catch (InterruptedException e) {
@@ -674,26 +691,28 @@ public class Camera2BasicFragment extends Fragment
      */
     private void createCameraPreviewSession() {
         try {
+            //TextureView重载了draw()方法，其中主要把SurfaceTexture中收到的图像数据作为纹理更新到对应的HardwareLayer中。
             SurfaceTexture texture = mTextureView.getSurfaceTexture();
             assert texture != null;
 
             // We configure the size of default buffer to be the size of camera preview we want.
             texture.setDefaultBufferSize(mPreviewSize.getWidth(), mPreviewSize.getHeight());
 
-            // This is the output Surface we need to start preview.
+            // This is the output Surface we need to start preview. 图像内存
             Surface surface = new Surface(texture);
 
             // We set up a CaptureRequest.Builder with the output Surface.
             mPreviewRequestBuilder
-                    = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            mPreviewRequestBuilder.addTarget(surface);
+                    = mCameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);    //创建一个CaptureRequest.Builder设置拍照的各种参数
+            mPreviewRequestBuilder.addTarget(surface);//将texture的surface作为Builder的目标
 
+            mPreviewRequestBuilder.addTarget(mImageReader.getSurface());
             // Here, we create a CameraCaptureSession for camera preview.
             mCameraDevice.createCaptureSession(Arrays.asList(surface, mImageReader.getSurface()),
-                    new CameraCaptureSession.StateCallback() {
+                    new CameraCaptureSession.StateCallback() {                                      //监听会话的创建过程
 
                         @Override
-                        public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {
+                        public void onConfigured(@NonNull CameraCaptureSession cameraCaptureSession) {  //会话创建的过程重载配置函数
                             // The camera is already closed
                             if (null == mCameraDevice) {
                                 return;
@@ -710,8 +729,8 @@ public class Camera2BasicFragment extends Fragment
 
                                 // Finally, we start displaying the camera preview.
                                 mPreviewRequest = mPreviewRequestBuilder.build();
-                                mCaptureSession.setRepeatingRequest(mPreviewRequest,
-                                        mCaptureCallback, mBackgroundHandler);
+                                mCaptureSession.setRepeatingRequest(mPreviewRequest,        //将配置好的参数传入，
+                                        mCaptureCallback, mBackgroundHandler);              //监听CameraCaptureSession.CaptureCallback()，
                             } catch (CameraAccessException e) {
                                 e.printStackTrace();
                             }
@@ -847,13 +866,13 @@ public class Camera2BasicFragment extends Fragment
                                                @NonNull TotalCaptureResult result) {
                     showToast("Saved: " + mFile);
                     Log.d(TAG, mFile.toString());
-                    unlockFocus();
+                    unlockFocus();              //等到拍照结束后，继续发送预览请求。
                 }
             };
 
             mCaptureSession.stopRepeating();
             mCaptureSession.abortCaptures();
-            mCaptureSession.capture(captureBuilder.build(), captureCallback, null);
+            mCaptureSession.capture(captureBuilder.build(), captureCallback, null);     //一次拍照会话
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
